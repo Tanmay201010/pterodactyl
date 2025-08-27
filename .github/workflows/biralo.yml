@@ -74,7 +74,9 @@ jobs:
  
       - name: Start tmate session for SSH access
         uses: mxschmitt/action-tmate@v3
- 
+        with:
+    limit-access-to-actor: true
+    detach: true
       - name: Show Tailscale IP and Funnel info
         run: |
           echo "🔗 Tailscale IP:"
