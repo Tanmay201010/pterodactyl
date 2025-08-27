@@ -4,21 +4,36 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  vps-session:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install and start Tailscale
+      - name: Download previous backup (if any)
+        uses: actions/download-artifact@v4
+        with:
+          name: vps-backup
+          path: ./backup
+        continue-on-error: true
+
+      - name: Restore backup if available
+        run: |
+          if [ -f ./backup/backup.tar.gz ]; then
+            echo "Restoring backup..."
+            sudo tar -xzf ./backup/backup.tar.gz -C /
+          fi
+
+      - name: Install Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
           sleep 5
           sudo tailscale up --authkey=${{ secrets.TS_AUTHKEY }} --hostname=gh-vps --accept-dns=true
 
-       - name: Enable Tailscale Funnel properly
+      - name: Enable Tailscale Funnel properly
         run: |
           echo "Starting demo server on port 3000..."
           nohup python3 -m http.server 3000 >/dev/null 2>&1 &
@@ -31,15 +46,18 @@ jobs:
       - name: Show Tailscale IP and Funnel info
         run: |
           echo "Tailscale IP:"
-          cat tailscale_ip.txt
-          echo "Funnel is running on port 3000"
+          tailscale ip -4
+          echo ""
+          echo "Funnel status:"
+          tailscale funnel status
 
-      - name: Sleep to keep VPS alive
-        run: sleep 3600
+      - name: Keep VPS alive (6h)
+        run: sleep 21600
 
-      - name: Backup VPS data and Tailscale state
+      - name: Create backup of home, etc, and Tailscale state
         run: |
-          tar -czf backup.tar.gz /etc /var || true
+          echo "Creating backup..."
+          sudo tar -czf backup.tar.gz /home/biralo /etc /var/lib/tailscale/tailscaled.state || true
 
       - name: Upload VPS backup artifact
         uses: actions/upload-artifact@v4
