@@ -11,33 +11,24 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup tmate session (background)
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: true
-          detach: true
-
-      - name: Authenticate Tailscale
+      - name: Install and start Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
           sleep 5
           sudo tailscale up --authkey=${{ secrets.TS_AUTHKEY }} --hostname=gh-vps --accept-dns=true
 
-      - name: Enable Tailscale Funnel
+      - name: Enable Tailscale Funnel on port 3000
         run: |
           echo "Enabling Funnel on port 3000..."
-          # Start a simple HTTP server to ensure port 3000 is listening
-          nohup python3 -m http.server 3000 >/dev/null 2>&1 &
-          sleep 3
-          sudo tailscale funnel --yes 3000
-          echo "✅ Funnel is active on port 3000"
-          tailscale funnel status
+          sudo tailscale funnel 3000 --yes
+          echo "Tailscale Funnel enabled on port 3000"
+          tailscale ip -4 | tee tailscale_ip.txt
 
       - name: Show Tailscale IP and Funnel info
         run: |
           echo "Tailscale IP:"
-          tailscale ip -4
+          cat tailscale_ip.txt
           echo "Funnel is running on port 3000"
 
       - name: Sleep to keep VPS alive
