@@ -2,6 +2,8 @@ name: VPS Workflow
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"   # Runs every 6 hours
 
 jobs:
   build:
@@ -11,13 +13,21 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup tmate session (background)
-        uses: mxschmitt/action-tmate@v3
+      - name: Download previous backup (if any)
+        uses: actions/download-artifact@v4
         with:
-          limit-access-to-actor: true
-          detach: true
+          name: vps-backup
+          path: ./backup
+        continue-on-error: true
 
-      - name: Authenticate Tailscale
+      - name: Restore previous backup
+        run: |
+          if [ -f ./backup/backup.tar.gz ]; then
+            echo "Restoring previous backup..."
+            sudo tar -xzf ./backup/backup.tar.gz -C /
+          fi
+
+      - name: Install Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
@@ -26,22 +36,33 @@ jobs:
 
       - name: Enable Tailscale Funnel
         run: |
+          echo "Enabling Funnel on port 3000..."
           sudo tailscale funnel 3000 --yes
-          echo "Tailscale Funnel enabled on port 3000"
+          echo "✅ Funnel is active"
           tailscale ip -4 | tee tailscale_ip.txt
 
       - name: Show Tailscale IP and Funnel info
         run: |
           echo "Tailscale IP:"
           cat tailscale_ip.txt
-          echo "Funnel is running on port 3000"
+          echo "Funnel running on port 3000"
 
-      - name: Sleep to keep VPS alive
-        run: sleep 3600
+      - name: Setup tmate (background SSH)
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+          detach: true
 
-      - name: Backup VPS data and Tailscale state
+      - name: Keep VPS alive (6h)
+        run: sleep 21600
+
+      - name: Create backup
         run: |
-          tar -czf backup.tar.gz /etc /var || true
+          echo "Creating backup of home, etc, and tailscale state..."
+          sudo tar -czf backup.tar.gz \
+            /home/biralo \
+            /etc \
+            /var/lib/tailscale/tailscaled.state || true
 
       - name: Upload VPS backup artifact
         uses: actions/upload-artifact@v4
