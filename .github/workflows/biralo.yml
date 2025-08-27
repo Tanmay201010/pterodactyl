@@ -18,12 +18,15 @@ jobs:
           sleep 5
           sudo tailscale up --authkey=${{ secrets.TS_AUTHKEY }} --hostname=gh-vps --accept-dns=true
 
-      - name: Enable Tailscale Funnel on port 3000
+       - name: Enable Tailscale Funnel properly
         run: |
-          echo "Enabling Funnel on port 3000..."
-          sudo tailscale funnel 3000 --yes
-          echo "Tailscale Funnel enabled on port 3000"
-          tailscale ip -4 | tee tailscale_ip.txt
+          echo "Starting demo server on port 3000..."
+          nohup python3 -m http.server 3000 >/dev/null 2>&1 &
+          sleep 3
+          echo "Enabling Funnel on localhost:3000 via port 8443..."
+          sudo tailscale funnel --https=8443 --bg localhost:3000
+          echo "✅ Funnel is active on port 8443"
+          tailscale funnel status
 
       - name: Show Tailscale IP and Funnel info
         run: |
