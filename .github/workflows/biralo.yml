@@ -1,102 +1,50 @@
-name: Continuous Persistent VPS
- 
+name: VPS Workflow
+
 on:
-  schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours
   workflow_dispatch:
- 
+
 jobs:
-  vps-session:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # Just under 6 hours
- 
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
- 
-      - name: Set hostname to biralo
-        run: sudo hostnamectl set-hostname biralo
- 
-      - name: Download VPS backup (if any)
-        uses: actions/download-artifact@v4
-        with:
-          name: vps-backup
-          path: ./backup
-        continue-on-error: true
- 
-      - name: Install prerequisites
-        run: |
-          sudo apt update
-          sudo apt install -y tmate curl unzip sudo net-tools neofetch
- 
-      - name: Install Tailscale official script
-        run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
- 
-      - name: Restore backup files
-        run: |
-          if [ -f ./backup/backup.zip ]; then
-            unzip -o ./backup/backup.zip -d /
-          else
-            echo "No backup found, starting fresh"
-          fi
- 
-      - name: Restore Tailscale state
-        run: |
-          if [ -f /opt/vps-backup/data/tailscaled.state ]; then
-            sudo mkdir -p /var/lib/tailscale
-            sudo cp /opt/vps-backup/data/tailscaled.state /var/lib/tailscale/tailscaled.state
-            sudo chmod 600 /var/lib/tailscale/tailscaled.state
-          fi
- 
-      - name: Start Tailscale
-        run: |
-          sudo tailscaled &
-          sleep 8
-          sudo tailscale up --authkey ${{ secrets.TAILSCALE_AUTHKEY }} --hostname=biralo --accept-routes --accept-dns=false || echo "Tailscale already up"
- 
-      - name: Enable Funnel (port 8080)
-        run: |
-          # Start a demo HTTP server
-          nohup python3 -m http.server 8080 --directory /home/runner > server.log 2>&1 &
-          # Expose via Funnel
-          sudo tailscale funnel 8080 &
-          echo "Funnel enabled on port 8080"
- 
-      - name: Create user biralo with sudo
-        run: |
-          if ! id -u biralo >/dev/null 2>&1; then
-            sudo useradd -m -s /bin/bash biralo
-            echo "biralo:biralo" | sudo chpasswd
-            sudo usermod -aG sudo biralo
-            echo "biralo ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/biralo
-          fi
- 
-      - name: Start tmate session for SSH access
+
+      - name: Setup tmate session (background)
         uses: mxschmitt/action-tmate@v3
         with:
-             limit-access-to-actor: true
-             detach: true
+          limit-access-to-actor: true
+          detach: true
+
+      - name: Authenticate Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
+          sleep 5
+          sudo tailscale up --authkey=${{ secrets.TS_AUTHKEY }} --hostname=gh-vps --accept-dns=true
+
+      - name: Enable Tailscale Funnel
+        run: |
+          sudo tailscale funnel 3000 --yes
+          echo "Tailscale Funnel enabled on port 3000"
+          tailscale ip -4 | tee tailscale_ip.txt
+
       - name: Show Tailscale IP and Funnel info
         run: |
-          echo "🔗 Tailscale IP:"
-          tailscale ip -4 || echo "Tailscale IP not found"
-          echo ""
-          echo "🌐 Funnel URL:"
-          tailscale status --json | jq -r '.Self.HostName' | awk '{print "https://"$1".ts.net"}'
- 
+          echo "Tailscale IP:"
+          cat tailscale_ip.txt
+          echo "Funnel is running on port 3000"
+
       - name: Sleep to keep VPS alive
-        run: sleep 21600  # 6 hours
- 
-      - name: Backup VPS data and tailscale state
+        run: sleep 3600
+
+      - name: Backup VPS data and Tailscale state
         run: |
-          sudo mkdir -p /opt/vps-backup/data
-          sudo cp /var/lib/tailscale/tailscaled.state /opt/vps-backup/data/
-          sudo chown -R $USER:$USER /opt/vps-backup
-          zip -r backup.zip /opt/vps-backup
- 
+          tar -czf backup.tar.gz /etc /var || true
+
       - name: Upload VPS backup artifact
         uses: actions/upload-artifact@v4
         with:
           name: vps-backup
-          path: backup.zip
+          path: backup.tar.gz
