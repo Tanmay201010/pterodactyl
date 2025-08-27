@@ -53,7 +53,15 @@ jobs:
         run: |
           sudo tailscaled &
           sleep 8
-          sudo tailscale up --authkey ${{ secrets.TAILSCALE_AUTHKEY }} --hostname=biralo || echo "Tailscale already up"
+          sudo tailscale up --authkey ${{ secrets.TAILSCALE_AUTHKEY }} --hostname=biralo --accept-routes --accept-dns=false || echo "Tailscale already up"
+ 
+      - name: Enable Funnel (port 8080)
+        run: |
+          # Start a demo HTTP server
+          nohup python3 -m http.server 8080 --directory /home/runner > server.log 2>&1 &
+          # Expose via Funnel
+          sudo tailscale funnel 8080 &
+          echo "Funnel enabled on port 8080"
  
       - name: Create user biralo with sudo
         run: |
@@ -67,13 +75,13 @@ jobs:
       - name: Start tmate session for SSH access
         uses: mxschmitt/action-tmate@v3
  
-      - name: Show Tailscale IP and tmate info
+      - name: Show Tailscale IP and Funnel info
         run: |
           echo "🔗 Tailscale IP:"
           tailscale ip -4 || echo "Tailscale IP not found"
           echo ""
-          echo "🔑 tmate SSH session:"
-          cat $HOME/.tmate.sock/ssh
+          echo "🌐 Funnel URL:"
+          tailscale status --json | jq -r '.Self.HostName' | awk '{print "https://"$1".ts.net"}'
  
       - name: Sleep to keep VPS alive
         run: sleep 21600  # 6 hours
